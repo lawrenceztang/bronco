@@ -54,3 +54,35 @@ def run_patch(repo_path, fix):
     finally:
         # Clean up the temporary patch file
         os.remove(temp_patch_file_path)
+
+
+def replace_new_files(sympy_dir, new_files):
+    """
+    Replaces or creates files in the sympy_dir with the content from new_files.
+
+    Args:
+    sympy_dir (str): The directory where the files should be replaced or created.
+    new_files (list of tuples): Each tuple contains (file_name, file_text).
+                                - file_name: Relative file path (str)
+                                - file_text: Text content of the file (str)
+
+    Returns:
+    None
+    """
+    # Ensure the sympy_dir exists
+    if not os.path.isdir(sympy_dir):
+        raise ValueError(f"The directory {sympy_dir} does not exist.")
+
+    for file_name, file_text in new_files:
+        # Get the full path to the file
+        file_path = os.path.join(sympy_dir, file_name)
+
+        # Ensure the directory for the file exists
+        file_dir = os.path.dirname(file_path)
+        os.makedirs(file_dir, exist_ok=True)  # Create directories if they don't exist
+
+        # Write the file content
+        with open(file_path, 'w') as file:
+            file.write(file_text)
+
+        print(f"Replaced/Created file: {file_path}")

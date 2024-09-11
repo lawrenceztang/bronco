@@ -79,16 +79,28 @@ However, the previous patch had the following error:
 Write a new patch that doesn't have an error.
 """
 
+GEN_OVERVIEW_PROMPT = "You will be provided with a file in a code base and an issue statement explaining a problem to resolve."
+
+GEN_FIX_PROMPT = "I need you to solve this issue by outlining the changes to make. "
+
 def remove_first_and_last_line(text):
     lines = text.splitlines()
     return '\n'.join(lines[1:-1]) if len(lines) > 2 else ''
+
+def join_code(codebase):
+    out = ""
+    for file in codebase:
+        out += "[start of " + file[0] + "]"
+        out += file[1]
+        out += "[end of " + file[0] + "]\n"
+    return out
 
 def get_patch(problem_statement, relevant_code, previous_patch=None, patch_error=None):
     if previous_patch:
         revise_statement = REVISE_STATEMENT.format(previous_patch, patch_error)
         query = OVERVIEW_PROMPT + "\n<issue>\n" + problem_statement + "\n<\issue>\n<code>\n" + relevant_code + "<\code>\n" + FIX_PROMPT + "\n" + revise_statement + "\n" + STEP_BY_STEP
     else:
-        query = OVERVIEW_PROMPT + "\n<issue>\n" + problem_statement + "\n<\issue>\n<code>\n" + relevant_code + "<\code>\n" + FIX_PROMPT + "\n" + STEP_BY_STEP
+        query = OVERVIEW_PROMPT + "\n<issue>\n" + problem_statement + "\n<\issue>\n<code>\n" + relevant_code + "<\code>\n" + FIX_PROMPT + STEP_BY_STEP
 
     messages = [{"role": "user", "content": query}]
     response = client.chat.completions.create(
@@ -104,3 +116,29 @@ def get_patch(problem_statement, relevant_code, previous_patch=None, patch_error
         messages=messages,
     )
     return response.choices[0].message.content
+
+def get_new_code(problem_statement, code, previous_patch=None, patch_error=None):
+    joined_code = join_code(code)
+    if previous_patch:
+        revise_statement = REVISE_STATEMENT.format(previous_patch, patch_error)
+        query = OVERVIEW_PROMPT + "\n<issue>\n" + problem_statement + "\n<\issue>\n<code>\n" + joined_code + "<\code>\n" + GEN_FIX_PROMPT + "\n" + revise_statement + "\n" + STEP_BY_STEP
+    else:
+        query = OVERVIEW_PROMPT + "\n<issue>\n" + problem_statement + "\n<\issue>\n<code>\n" + joined_code + "<\code>\n" + GEN_FIX_PROMPT + "\n" + STEP_BY_STEP
+
+    messages = [{"role": "user", "content": query}]
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=messages,
+    )
+    outputs = []
+    for file in code:
+        query2 = f"Now output just the complete code for the new file {file[0]}. Do not output anything else."
+        messages = [{"role": "user", "content": query},
+                    {"role": "assistant", "content": response.choices[0].message.content},
+                    {"role": "user", "content": query2}]
+        response2 = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=messages,
+        )
+        outputs.append((file[0], response2.choices[0].message.content))
+    return outputs
