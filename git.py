@@ -1,6 +1,6 @@
 import os
 import subprocess
-
+import tempfile
 
 def checkout(dir, commit):
     """
@@ -16,37 +16,41 @@ def checkout(dir, commit):
 
     try:
         # Run git checkout with the specified commit or branch
-        subprocess.run(["git", "checkout", commit], check=True)
+        subprocess.run(["git", "checkout", "-f", commit], check=True)
         print(f"Checked out {commit} successfully.")
 
     except subprocess.CalledProcessError as e:
         print(f"An error occurred during checkout: {e}")
 
-def patch(repo_path, fix):
-    """
-    Applies the patch (provided as a string) to the specified local Git repository.
 
-    :param repo_path: The path to the local Git repository.
-    :param fix: The string content of the patch file.
-    :return: None
-    """
+def run_patch(repo_path, fix):
+    if not os.path.isdir(repo_path):
+        return "Error: The specified repository path is not valid."
 
-    # Navigate to the local Git repository
-    os.chdir(repo_path)
-
-    # Write the patch string to a temporary patch file
-    patch_file_path = os.path.join(repo_path, "temp_patch.diff")
-    with open(patch_file_path, 'w') as patch_file:
-        patch_file.write(fix)
-
-    # Apply the patch using `git apply`
     try:
-        # Apply the patch
-        subprocess.run(["git", "apply", patch_file_path], check=True)
-        print("Patch applied successfully.")
+        os.chdir(repo_path)
+    except OSError as e:
+        return f"Error: Failed to change directory to {repo_path}. {e}"
 
-        # Optionally clean up the patch file after applying
-        os.remove(patch_file_path)
+    try:
+        with tempfile.NamedTemporaryFile('w+', delete=False) as temp_patch_file:
+            temp_patch_file.write(fix)
+            temp_patch_file.flush()  # Make sure all content is written
 
-    except subprocess.CalledProcessError as e:
-        print(f"An error occurred while applying the patch: {e}")
+            # Store the temporary file path
+            temp_patch_file_path = temp_patch_file.name
+    except Exception as e:
+        return f"Error: Failed to create temporary patch file. {e}"
+
+    try:
+        result = subprocess.run(['patch', '-p1', '-i', temp_patch_file_path], capture_output=True, text=True)
+
+        if result.returncode == 0:
+            return "Patch applied successfully:\n" + result.stdout
+        else:
+            return "Error applying patch:\n" + result.stderr
+    except Exception as e:
+        return f"Error: {e}"
+    finally:
+        # Clean up the temporary patch file
+        os.remove(temp_patch_file_path)
