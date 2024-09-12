@@ -1,6 +1,6 @@
 from datasets import load_dataset
 from gpt import *
-from git import *
+from tools import *
 import re
 
 sympy_dir = "/Users/lawrencetang/Documents/python/sympy"

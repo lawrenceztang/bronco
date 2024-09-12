@@ -1,6 +1,7 @@
 import os
 import subprocess
 import tempfile
+import sys
 
 def checkout(dir, commit):
     """
@@ -16,6 +17,7 @@ def checkout(dir, commit):
 
     try:
         # Run git checkout with the specified commit or branch
+
         subprocess.run(["git", "checkout", "-f", commit], check=True)
         print(f"Checked out {commit} successfully.")
 
@@ -86,3 +88,40 @@ def replace_new_files(sympy_dir, new_files):
             file.write(file_text)
 
         print(f"Replaced/Created file: {file_path}")
+
+def run_specific_tests(sympy_dir, new_files, conda_env):
+    # Construct the base command to run Python from the conda environment
+    conda_run_command = ['conda', 'run', '-n', conda_env, 'python', '-c']
+
+    # Build the test script as a Python string to be executed in the conda environment
+    script = f"""
+import sys
+sys.path.insert(0, '{sympy_dir}')
+
+import os
+import sympy
+
+os.chdir('{sympy_dir}')
+
+new_files = {new_files}
+
+for test_file in new_files:
+    test_file_path = os.path.join('{sympy_dir}', test_file)
+    if os.path.exists(test_file_path):
+        print(f"Running tests in: {{test_file}}")
+        sympy.test(test_file, verbose=True)
+    else:
+        print(f"Test file {{test_file}} not found in {{sympy_dir}}")
+"""
+
+    # Run the test script inside the specified conda environment
+    result = subprocess.run(conda_run_command + [script], capture_output=True, text=True)
+
+    # Print the results from the subprocess
+    if result.returncode == 0:
+        return result.stdout
+    else:
+        return result.stderr
+
+if __name__ == "__main__":
+    run_specific_tests("/Users/lawrencetang/Documents/python/sympy", ["sympy/printing/tests/test_ccode.py"], "python39")

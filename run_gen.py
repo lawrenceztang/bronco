@@ -1,6 +1,6 @@
 from datasets import load_dataset
 from gpt import *
-from git import *
+from tools import *
 import re
 
 sympy_dir = "/Users/lawrencetang/Documents/python/sympy"
@@ -31,17 +31,55 @@ def extract_blocks(content):
     # Return the extracted blocks as a list of tuples (file name, block content)
     return blocks
 
-def run_loop(problem_statement, relevant_code, num_loops=5):
-    return get_new_code(problem_statement, relevant_code)
+def get_test_files_from_code(code):
+    out = []
+    for file in code:
+        if file[0][-2:] == "py":
+            directory, filename = os.path.split(file[0])
+            name, ext = os.path.splitext(filename)
+            test_directory = os.path.join(directory, 'tests')
+            test_filename = f"test_{name}.py"
+            test_file_path = os.path.join(test_directory, test_filename)
 
+            full_path = os.path.join(sympy_dir, test_file_path)
+
+            if os.path.exists(full_path):
+                with open(full_path, 'r') as file:
+                    content = file.read()
+                    out.append((test_file_path, content))
+    return out
+
+
+def run_loop(problem_statement, relevant_code, num_loops=5):
+    new_files = None
+    test_files = None
+    test_result = None
+    previous_code = None
+    for _ in range(num_loops):
+        test_files = get_test_files_from_code(relevant_code)
+        new_files, reasoning = get_new_code(problem_statement, relevant_code, previous_code, test_result)
+        new_test_files = get_new_test_code(reasoning, new_files, test_files)
+
+        new_files = [(n[0], remove_first_and_last_line(n[1])) for n in new_files]
+        new_test_files = [(n[0], remove_first_and_last_line(n[1])) for n in new_test_files]
+
+        replace_new_files(sympy_dir, new_files)
+        replace_new_files(sympy_dir, new_test_files)
+
+        test_result = run_specific_tests(sympy_dir, [n[0] for n in new_test_files], "python39")
+        print(test_result)
+        if test_result[:5] == "Tests":
+            return new_files, test_files
+
+        previous_code = new_test_files
+
+    return new_files, test_files
 
 # Load the dataset
 dataset = load_dataset("princeton-nlp/SWE-bench_Lite_oracle")
 
 # Inspect the dataset
 sympy_examples = check_for_sympy(dataset)
-for example in sympy_examples:
+for example in sympy_examples[3:]:
     checkout(sympy_dir, example["base_commit"])
-    new_files = run_on_oracle_text(example)
-    new_files = [(n[0], remove_first_and_last_line(n[1])) for n in new_files]
-    replace_new_files(sympy_dir, new_files)
+    new_files, new_test_files = run_on_oracle_text(example)

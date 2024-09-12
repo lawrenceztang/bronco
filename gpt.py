@@ -83,6 +83,22 @@ GEN_OVERVIEW_PROMPT = "You will be provided with a file in a code base and an is
 
 GEN_FIX_PROMPT = "I need you to solve this issue by outlining the changes to make. "
 
+GEN_REVISE_STATEMENT = """
+The previous code was:
+{}
+
+However, running the test cases produced the following result:
+{}
+
+Fix the code so it passes the test cases.
+"""
+
+TEST_OVERVIEW_PROMPT = "You will be provided with a code base and an issue statement explaining a bug. "
+
+TEST_FIX_PROMPT = "I need you to outline the tests to write that can verify if the bug is fixed. "
+
+OVERVIEW_ERROR_PROMPT = "You will be provided with an issue statement explaining a problem to resolve, a partial code base that attempts to resolve this issue, and the output of unit tests for this attempted resolution."
+
 def remove_first_and_last_line(text):
     lines = text.splitlines()
     return '\n'.join(lines[1:-1]) if len(lines) > 2 else ''
@@ -90,9 +106,9 @@ def remove_first_and_last_line(text):
 def join_code(codebase):
     out = ""
     for file in codebase:
-        out += "[start of " + file[0] + "]"
+        out += "[start of " + file[0] + "]\n"
         out += file[1]
-        out += "[end of " + file[0] + "]\n"
+        out += "\n[end of " + file[0] + "]\n"
     return out
 
 def get_patch(problem_statement, relevant_code, previous_patch=None, patch_error=None):
@@ -117,11 +133,11 @@ def get_patch(problem_statement, relevant_code, previous_patch=None, patch_error
     )
     return response.choices[0].message.content
 
-def get_new_code(problem_statement, code, previous_patch=None, patch_error=None):
+def get_new_code(problem_statement, code, previous_code=None, test_result=None):
     joined_code = join_code(code)
-    if previous_patch:
-        revise_statement = REVISE_STATEMENT.format(previous_patch, patch_error)
-        query = OVERVIEW_PROMPT + "\n<issue>\n" + problem_statement + "\n<\issue>\n<code>\n" + joined_code + "<\code>\n" + GEN_FIX_PROMPT + "\n" + revise_statement + "\n" + STEP_BY_STEP
+    if previous_code:
+        joined_previous_code = join_code(previous_code)
+        query = OVERVIEW_ERROR_PROMPT + "\n<issue>\n" + problem_statement + "\n<\issue>\n<code>\n" + joined_previous_code + "<\code>\n<\output>\n" + test_result + "\n<\output>\n" + GEN_FIX_PROMPT + "\n" + STEP_BY_STEP
     else:
         query = OVERVIEW_PROMPT + "\n<issue>\n" + problem_statement + "\n<\issue>\n<code>\n" + joined_code + "<\code>\n" + GEN_FIX_PROMPT + "\n" + STEP_BY_STEP
 
@@ -130,9 +146,32 @@ def get_new_code(problem_statement, code, previous_patch=None, patch_error=None)
         model="gpt-4o-mini",
         messages=messages,
     )
+    reasoning = response.choices[0].message.content
     outputs = []
     for file in code:
-        query2 = f"Now output just the complete code for the new file {file[0]}. Do not output anything else."
+        query2 = f"Now output just the complete working code for the file {file[0]}. Do not output anything else."
+        messages = [{"role": "user", "content": query},
+                    {"role": "assistant", "content": reasoning},
+                    {"role": "user", "content": query2}]
+        response2 = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=messages,
+        )
+        outputs.append((file[0], response2.choices[0].message.content))
+    return outputs, reasoning
+
+def get_new_test_code(reasoning, new_files, test_files):
+    joined_code = join_code(test_files)
+    query = TEST_OVERVIEW_PROMPT + "\n<solution>\n" + reasoning + "\n<\solution>\n<code>\n" + joined_code + "<\code>\n" + TEST_FIX_PROMPT + "\n" + STEP_BY_STEP
+
+    messages = [{"role": "user", "content": query}]
+    response = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=messages,
+    )
+    outputs = []
+    for file in test_files:
+        query2 = f"Now output just the test code to append to the end of {file[0]}. Include lazy imports if necessary. Do not output anything else."
         messages = [{"role": "user", "content": query},
                     {"role": "assistant", "content": response.choices[0].message.content},
                     {"role": "user", "content": query2}]
@@ -140,5 +179,5 @@ def get_new_code(problem_statement, code, previous_patch=None, patch_error=None)
             model="gpt-4o-mini",
             messages=messages,
         )
-        outputs.append((file[0], response2.choices[0].message.content))
+        outputs.append((file[0], "```\n" + file[1] + "\n" + remove_first_and_last_line(response2.choices[0].message.content) + "\n```"))
     return outputs
