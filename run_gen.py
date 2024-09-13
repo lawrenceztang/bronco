@@ -52,28 +52,26 @@ def get_test_files_from_code(code):
 
 def run_loop(problem_statement, relevant_code, num_loops=5):
     new_files = None
-    test_files = None
+    test_files = get_test_files_from_code(relevant_code)
     test_result = None
-    previous_code = None
+    new_test_files = None
     for _ in range(num_loops):
-        test_files = get_test_files_from_code(relevant_code)
-        new_files, reasoning = get_new_code(problem_statement, relevant_code, previous_code, test_result)
-        new_test_files = get_new_test_code(reasoning, new_files, test_files)
-
+        new_files, reasoning = get_new_code(problem_statement, relevant_code, new_files, test_result)
         new_files = [(n[0], remove_first_and_last_line(n[1])) for n in new_files]
-        new_test_files = [(n[0], remove_first_and_last_line(n[1])) for n in new_test_files]
-
         replace_new_files(sympy_dir, new_files)
-        replace_new_files(sympy_dir, new_test_files)
 
-        test_result = run_specific_tests(sympy_dir, [n[0] for n in new_test_files], "python39")
-        print(test_result)
+        #Iterate on test files
+        for _ in range(3):
+            new_test_files = get_new_test_code(problem_statement, new_files, test_files, new_test_files, test_result)
+            new_test_files = [(n[0], remove_first_and_last_line(n[1])) for n in new_test_files]
+            replace_new_files(sympy_dir, new_test_files)
+            test_result = run_specific_tests(sympy_dir, [n[0] for n in new_test_files], "python39")
+            print("Test results: ", test_result)
+
         if test_result[:5] == "Tests":
-            return new_files, test_files
+            return new_files, new_test_files
 
-        previous_code = new_test_files
-
-    return new_files, test_files
+    return new_files, new_test_files
 
 # Load the dataset
 dataset = load_dataset("princeton-nlp/SWE-bench_Lite_oracle")

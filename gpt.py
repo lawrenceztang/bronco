@@ -93,11 +93,15 @@ However, running the test cases produced the following result:
 Fix the code so it passes the test cases.
 """
 
-TEST_OVERVIEW_PROMPT = "You will be provided with a code base and an issue statement explaining a bug. "
+TEST_OVERVIEW_PROMPT = "You will be provided with a partial code base, test files for the partial code base, and an issue statement explaining a bug. "
 
 TEST_FIX_PROMPT = "I need you to outline the tests to write that can verify if the bug is fixed. "
 
+TEST_FIX_ERROR_PROMPT = "If changes are necessary, I need you to outline the revised tests to write that can verify if the bug is fixed."
+
 OVERVIEW_ERROR_PROMPT = "You will be provided with an issue statement explaining a problem to resolve, a partial code base that attempts to resolve this issue, and the output of unit tests for this attempted resolution."
+
+TEST_OVERVIEW_ERROR_PROMPT = "You will be provided with an issue statement explaining a problem to resolve, a partial code base that attempts to resolve this issue, test files for the partial code base, and the output of the tests."
 
 def remove_first_and_last_line(text):
     lines = text.splitlines()
@@ -134,6 +138,7 @@ def get_patch(problem_statement, relevant_code, previous_patch=None, patch_error
     return response.choices[0].message.content
 
 def get_new_code(problem_statement, code, previous_code=None, test_result=None):
+    print("Getting new code")
     joined_code = join_code(code)
     if previous_code:
         joined_previous_code = join_code(previous_code)
@@ -149,7 +154,10 @@ def get_new_code(problem_statement, code, previous_code=None, test_result=None):
     reasoning = response.choices[0].message.content
     outputs = []
     for file in code:
-        query2 = f"Now output just the complete working code for the file {file[0]}. Do not output anything else."
+        query2 = f"""
+        Now output just the complete working code for the file {file[0]}. Do not output anything else. For reference, the original code was: 
+        {file[1]}
+        """
         messages = [{"role": "user", "content": query},
                     {"role": "assistant", "content": reasoning},
                     {"role": "user", "content": query2}]
@@ -158,11 +166,19 @@ def get_new_code(problem_statement, code, previous_code=None, test_result=None):
             messages=messages,
         )
         outputs.append((file[0], response2.choices[0].message.content))
+    print("Got new code")
     return outputs, reasoning
 
-def get_new_test_code(reasoning, new_files, test_files):
-    joined_code = join_code(test_files)
-    query = TEST_OVERVIEW_PROMPT + "\n<solution>\n" + reasoning + "\n<\solution>\n<code>\n" + joined_code + "<\code>\n" + TEST_FIX_PROMPT + "\n" + STEP_BY_STEP
+def get_new_test_code(problem_statement, new_files, test_files, previous_test_code=None, test_result=None):
+    print("Getting new test code")
+    joined_test_code = join_code(test_files)
+    joined_code = join_code(new_files)
+
+    if previous_test_code:
+        joined_previous_test_code = join_code(previous_test_code)
+        query = TEST_OVERVIEW_ERROR_PROMPT + "\n<issue>\n" + problem_statement + "\n<\issue>\n<code>\n" + joined_code + "\n<\code>\n<tests>\n" + joined_previous_test_code + "\n<\\tests>\n<output>\n" + test_result + "\n<\output>\n" + TEST_FIX_ERROR_PROMPT + "\n" + STEP_BY_STEP
+    else:
+        query = TEST_OVERVIEW_PROMPT + "\n<issue>\n" + problem_statement + "\n<\issue>\n<code>\n" + joined_code + "\n<\code>\n<tests>\n" + joined_test_code + "\n<\\tests>\n" + TEST_FIX_PROMPT + "\n" + STEP_BY_STEP
 
     messages = [{"role": "user", "content": query}]
     response = client.chat.completions.create(
@@ -171,7 +187,7 @@ def get_new_test_code(reasoning, new_files, test_files):
     )
     outputs = []
     for file in test_files:
-        query2 = f"Now output just the test code to append to the end of {file[0]}. Include lazy imports if necessary. Do not output anything else."
+        query2 = f"Now output just the complete working code for the file {file[0]}. Do not output anything else."
         messages = [{"role": "user", "content": query},
                     {"role": "assistant", "content": response.choices[0].message.content},
                     {"role": "user", "content": query2}]
@@ -179,5 +195,6 @@ def get_new_test_code(reasoning, new_files, test_files):
             model="gpt-4o-mini",
             messages=messages,
         )
-        outputs.append((file[0], "```\n" + file[1] + "\n" + remove_first_and_last_line(response2.choices[0].message.content) + "\n```"))
+        outputs.append((file[0], response2.choices[0].message.content))
+    print("Got new test code")
     return outputs
